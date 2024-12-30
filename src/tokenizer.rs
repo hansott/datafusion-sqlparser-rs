@@ -3152,6 +3152,20 @@ mod tests {
     }
 
     #[test]
+    fn tokenize_nested_comments() {
+        let sql = "select 'foo' /*/**/*/";
+        let dialect = PostgreSqlDialect {};
+        let tokens = Tokenizer::new(&dialect, sql).tokenize().unwrap();
+        let expected = vec![
+            Token::make_keyword("select"),
+            Token::Whitespace(Whitespace::Space),
+            Token::SingleQuotedString("foo".to_string()),
+            Token::Whitespace(Whitespace::Space),
+            Token::Whitespace(Whitespace::MultiLineComment("/**/".to_string())),
+        ];
+    }
+
+    #[test]
     fn tokenize_triple_quoted_string() {
         fn check<F>(
             q: char, // The quote character to test
