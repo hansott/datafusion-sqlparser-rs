@@ -1864,22 +1864,31 @@ impl<'a> Tokenizer<'a> {
     ) -> Result<Option<Token>, TokenizerError> {
         let mut s = String::new();
         let mut nested = 1;
-        let mut last_ch = ' ';
+        let mut last_ch = ' '; // Neutral initial value
 
         loop {
             match chars.next() {
                 Some(ch) => {
-                    if last_ch == '/' && ch == '*' {
+                    if ch == '/' && matches!(chars.peek(), Some('*')) {
+                        s.push(ch);
+                        s.push(chars.next().unwrap()); // consume the '*'
                         nested += 1;
-                    } else if last_ch == '*' && ch == '/' {
+                        continue;
+                    }
+
+                    if ch == '*' && matches!(chars.peek(), Some('/')) {
+                        s.push(ch);
+                        let slash = chars.next();
                         nested -= 1;
                         if nested == 0 {
-                            s.pop();
+                            s.pop(); // remove the last '/'
                             break Ok(Some(Token::Whitespace(Whitespace::MultiLineComment(s))));
                         }
+                        s.push(slash.unwrap());
+                        continue;
                     }
+
                     s.push(ch);
-                    last_ch = ch;
                 }
                 None => {
                     break self.tokenizer_error(
