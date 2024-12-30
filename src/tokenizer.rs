@@ -2729,18 +2729,63 @@ mod tests {
 
     #[test]
     fn tokenize_nested_multiline_comment() {
-        let sql = String::from("0/*multi-line\n* \n/* comment \n /*comment*/*/ */ /comment*/1");
-
         let dialect = GenericDialect {};
+
+        let sql = String::from("0/*multi-line\n* \n/* comment \n /*comment*/*/ */ /comment*/1");
         let tokens = Tokenizer::new(&dialect, &sql).tokenize().unwrap();
         let expected = vec![
             Token::Number("0".to_string(), false),
             Token::Whitespace(Whitespace::MultiLineComment(
-                "multi-line\n* \n/* comment \n /*comment*/*/ */ /comment".to_string(),
+                "multi-line\n* \n/* comment \n /*comment*/*/ ".into(),
             )),
+            Token::Whitespace(Whitespace::Space),
+            Token::Div,
+            Token::Word(Word {
+                value: "comment".to_string(),
+                quote_style: None,
+                keyword: Keyword::COMMENT,
+            }),
+            Token::Mul,
+            Token::Div,
             Token::Number("1".to_string(), false),
         ];
         compare(expected, tokens);
+
+        let sql2 = String::from("0/*multi-line\n* \n/* comment \n /*comment/**/ */ /comment*/*/1");
+        let tokens2 = Tokenizer::new(&dialect, &sql2).tokenize().unwrap();
+        let expected2 = vec![
+            Token::Number("0".to_string(), false),
+            Token::Whitespace(Whitespace::MultiLineComment(
+                "multi-line\n* \n/* comment \n /*comment/**/ */ /comment*/".into(),
+            )),
+            Token::Number("1".to_string(), false),
+        ];
+        compare(expected2, tokens2);
+
+        let sql3 = String::from("SELECT 1 /* a /* b */ c */");
+        let tokens3 = Tokenizer::new(&dialect, &sql3).tokenize().unwrap();
+        let expected3 = vec![
+            Token::make_keyword("SELECT"),
+            Token::Whitespace(Whitespace::Space),
+            Token::Number("1".to_string(), false),
+            Token::Whitespace(Whitespace::Space),
+            Token::Whitespace(Whitespace::MultiLineComment(" a /* b */ c ".to_string())),
+        ];
+        compare(expected3, tokens3);
+    }
+
+    #[test]
+    fn tokenize_nested_multiline_comment_empty() {
+        let sql = "select 'foo' /*/**/*/";
+        let dialect = PostgreSqlDialect {};
+        let tokens = Tokenizer::new(&dialect, sql).tokenize().unwrap();
+        let expected = vec![
+            Token::make_keyword("select"),
+            Token::Whitespace(Whitespace::Space),
+            Token::SingleQuotedString("foo".to_string()),
+            Token::Whitespace(Whitespace::Space),
+            Token::Whitespace(Whitespace::MultiLineComment("/**/".to_string())),
+        ];
     }
 
     #[test]
@@ -3158,20 +3203,6 @@ mod tests {
 
             compare(expected, tokens);
         }
-    }
-
-    #[test]
-    fn tokenize_nested_comments() {
-        let sql = "select 'foo' /*/**/*/";
-        let dialect = PostgreSqlDialect {};
-        let tokens = Tokenizer::new(&dialect, sql).tokenize().unwrap();
-        let expected = vec![
-            Token::make_keyword("select"),
-            Token::Whitespace(Whitespace::Space),
-            Token::SingleQuotedString("foo".to_string()),
-            Token::Whitespace(Whitespace::Space),
-            Token::Whitespace(Whitespace::MultiLineComment("/**/".to_string())),
-        ];
     }
 
     #[test]
