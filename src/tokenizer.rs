@@ -1502,6 +1502,46 @@ impl<'a> Tokenizer<'a> {
         ))
     }
 
+    /// Tokenizes dollar quoted strings without a tag name
+    /// e.g. `$$this is a string$$`
+    fn tokenize_dollar_quoted_string_no_tag(
+        &self,
+        chars: &mut State,
+    ) -> Result<Token, TokenizerError> {
+        chars.next();
+
+        let mut s = String::new();
+        let mut is_terminated = false;
+        let mut prev: Option<char> = None;
+
+        while let Some(&ch) = chars.peek() {
+            if prev == Some('$') {
+                if ch == '$' {
+                    chars.next();
+                    is_terminated = true;
+                    break;
+                } else {
+                    s.push('$');
+                    s.push(ch);
+                }
+            } else if ch != '$' {
+                s.push(ch);
+            }
+
+            prev = Some(ch);
+            chars.next();
+        }
+
+        if chars.peek().is_none() && !is_terminated {
+            return self.tokenizer_error(chars.location(), "Unterminated dollar-quoted string");
+        }
+
+        Ok(Token::DollarQuotedString(DollarQuotedString {
+            value: s,
+            tag: None,
+        }))
+    }
+
     /// Tokenize dollar preceded value (i.e: a string/placeholder)
     fn tokenize_dollar_preceded_value(&self, chars: &mut State) -> Result<Token, TokenizerError> {
         let mut s = String::new();
@@ -1509,96 +1549,67 @@ impl<'a> Tokenizer<'a> {
 
         chars.next();
 
-        // If the dialect does not support dollar-quoted strings, then `$$` is rather a placeholder.
-        if matches!(chars.peek(), Some('$')) && !self.dialect.supports_dollar_placeholder() {
-            chars.next();
-
-            let mut is_terminated = false;
-            let mut prev: Option<char> = None;
-
-            while let Some(&ch) = chars.peek() {
-                if prev == Some('$') {
-                    if ch == '$' {
-                        chars.next();
-                        is_terminated = true;
-                        break;
-                    } else {
-                        s.push('$');
-                        s.push(ch);
-                    }
-                } else if ch != '$' {
-                    s.push(ch);
-                }
-
-                prev = Some(ch);
-                chars.next();
-            }
-
-            return if chars.peek().is_none() && !is_terminated {
-                self.tokenizer_error(chars.location(), "Unterminated dollar-quoted string")
-            } else {
-                Ok(Token::DollarQuotedString(DollarQuotedString {
-                    value: s,
-                    tag: None,
-                }))
-            };
-        } else {
+        if self.dialect.supports_dollar_placeholder() {
             value.push_str(&peeking_take_while(chars, |ch| {
-                ch.is_alphanumeric()
-                    || ch == '_'
-                    // Allow $ as a placeholder character if the dialect supports it
-                    || matches!(ch, '$' if self.dialect.supports_dollar_placeholder())
+                ch.is_alphanumeric() || ch == '_' || ch == '$'
             }));
 
-            // If the dialect does not support dollar-quoted strings, don't look for the end delimiter.
-            if matches!(chars.peek(), Some('$')) && !self.dialect.supports_dollar_placeholder() {
-                chars.next();
+            return Ok(Token::Placeholder(String::from("$") + &value));
+        }
 
-                'searching_for_end: loop {
-                    s.push_str(&peeking_take_while(chars, |ch| ch != '$'));
-                    match chars.peek() {
-                        Some('$') => {
-                            chars.next();
-                            let mut maybe_s = String::from("$");
-                            for c in value.chars() {
-                                if let Some(next_char) = chars.next() {
-                                    maybe_s.push(next_char);
-                                    if next_char != c {
-                                        // This doesn't match the dollar quote delimiter so this
-                                        // is not the end of the string.
-                                        s.push_str(&maybe_s);
-                                        continue 'searching_for_end;
-                                    }
-                                } else {
-                                    return self.tokenizer_error(
-                                        chars.location(),
-                                        "Unterminated dollar-quoted, expected $",
-                                    );
+        if matches!(chars.peek(), Some('$')) {
+            return self.tokenize_dollar_quoted_string_no_tag(chars);
+        }
+
+        value.push_str(&peeking_take_while(chars, |ch| {
+            ch.is_alphanumeric() || ch == '_'
+        }));
+
+        if matches!(chars.peek(), Some('$')) {
+            chars.next();
+
+            'searching_for_end: loop {
+                s.push_str(&peeking_take_while(chars, |ch| ch != '$'));
+                match chars.peek() {
+                    Some('$') => {
+                        chars.next();
+                        let mut maybe_s = String::from("$");
+                        for c in value.chars() {
+                            if let Some(next_char) = chars.next() {
+                                maybe_s.push(next_char);
+                                if next_char != c {
+                                    // This doesn't match the dollar quote delimiter so this
+                                    // is not the end of the string.
+                                    s.push_str(&maybe_s);
+                                    continue 'searching_for_end;
                                 }
-                            }
-                            if chars.peek() == Some(&'$') {
-                                chars.next();
-                                maybe_s.push('$');
-                                // maybe_s matches the end delimiter
-                                break 'searching_for_end;
                             } else {
-                                // This also doesn't match the dollar quote delimiter as there are
-                                // more characters before the second dollar so this is not the end
-                                // of the string.
-                                s.push_str(&maybe_s);
-                                continue 'searching_for_end;
+                                return self.tokenizer_error(
+                                    chars.location(),
+                                    "Unterminated dollar-quoted, expected $",
+                                );
                             }
                         }
-                        _ => {
-                            return self.tokenizer_error(
-                                chars.location(),
-                                "Unterminated dollar-quoted, expected $",
-                            )
+                        if chars.peek() == Some(&'$') {
+                            chars.next();
+                            maybe_s.push('$');
+                            // maybe_s matches the end delimiter
+                            break 'searching_for_end;
+                        } else {
+                            // This also doesn't match the dollar quote delimiter as there are
+                            // more characters before the second dollar so this is not the end
+                            // of the string.
+                            s.push_str(&maybe_s);
+                            continue 'searching_for_end;
                         }
                     }
+                    _ => {
+                        return self.tokenizer_error(
+                            chars.location(),
+                            "Unterminated dollar-quoted, expected $",
+                        )
+                    }
                 }
-            } else {
-                return Ok(Token::Placeholder(String::from("$") + &value));
             }
         }
 
