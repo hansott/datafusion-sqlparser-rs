@@ -2621,6 +2621,32 @@ mod tests {
     }
 
     #[test]
+    fn test_dollar_sign() {
+        let cases = vec![
+            (
+                String::from("$€$hey$€$"),
+                vec![Token::DollarQuotedString(DollarQuotedString {
+                    value: "hey".into(),
+                    tag: Some("€".into()),
+                })],
+            ),
+            (
+                String::from("$¼$yo$¼$"),
+                vec![Token::DollarQuotedString(DollarQuotedString {
+                    value: "yo".into(),
+                    tag: Some("¼".into()),
+                })],
+            ),
+        ];
+
+        let dialect = PostgreSqlDialect {};
+        for (sql, expected) in cases {
+            let tokens = Tokenizer::new(&dialect, &sql).tokenize().unwrap();
+            compare(expected, tokens);
+        }
+    }
+
+    #[test]
     fn tokenize_dollar_quoted_string_tagged_unterminated() {
         let sql = String::from("SELECT $tag$dollar '$' quoted strings have $tags like this$ or like this $$$different tag$");
         let dialect = GenericDialect {};
